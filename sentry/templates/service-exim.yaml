@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    io.kompose.service: smtp
+  name: {{ template "sentry.exim.fullname" . }}
+spec:
+  ports:
+    - name: "25"
+      port: 25
+      targetPort: 25
+  selector:
+    app: {{ template "sentry.fullname" . }}-smtp

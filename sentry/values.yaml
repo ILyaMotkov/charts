@@ -1,3 +1,9 @@
+global:
+  storageClass: sentry20
+  volumePermissions:
+    enabled: true
+
+
 prefix:
 
 user:
@@ -7,22 +13,30 @@ user:
 
 images:
   sentry:
-    # repository: getsentry/sentry
-    # tag: Chart.AppVersion
-    # pullPolicy: IfNotPresent
-    imagePullSecrets: []
+    imagePullSecrets:
+      - name: harbor
+    repository: dc2.srvhub.tools/tools/getsentry
+    tag: 20.8.1
+    pullPolicy: IfNotPresent
+    # imagePullSecrets: []
   snuba:
-    # repository: getsentry/snuba
-    # tag: Chart.AppVersion
-    # pullPolicy: IfNotPresent
+    #    repository: getsentry/snuba
+    #    tag: 20.8.0
+    #    pullPolicy: IfNotPresent
     imagePullSecrets: []
   relay:
-    # repository: getsentry/relay
-    # tag: Chart.AppVersion
-    # pullPolicy: IfNotPresent
+    #    repository: getsentry/relay
+    #    tag: 20.8.0
+    #    pullPolicy: IfNotPresent
     imagePullSecrets: []
+  exim:
+    imagePullSecrets:
+      - name: harbor
+    repository: dc2.srvhub.tools/tools/exim-sentry
+    pullPolicy: IfNotPresent
 
 relay:
+  mode: proxy
   replicas: 1
   env: []
   probeInitialDelaySeconds: 10
@@ -57,7 +71,7 @@ sentry:
       targetCPUUtilizationPercentage: 50
 
   worker:
-    replicas: 3
+    replicas: 2
     # concurrency: 4
     env: []
     resources: {}
@@ -208,16 +222,25 @@ system:
   #secretKey: "xx"
 
 mail:
-  backend: dummy # smtp
-  useTls: false
-  username: ""
-  password: ""
+  backend: smtp # smtp
+  useTls: no
+  username:
+  password:
   port: 25
-  host: ""
-  from: ""
+  host: smtp
+  from: developer@srvhub.ru
+
+exim:
+  smtpHost: mail.srvhub.ru
+  smtpPassword: id~NU9#9
+  smtpPort: 587
+  smtpUser: developer@srvhub.ru
 
 symbolicator:
   enabled: false
+
+transaction_events:
+  force_disable_internal_project: true
 
 auth:
   register: true
@@ -242,7 +265,7 @@ github: {} # https://github.com/settings/apps (Create a Github App)
 
 githubSso: {} # https://github.com/settings/developers (Create a OAuth App)
   # clientId: "xx"
-  # clientSecret: "xx"
+# clientSecret: "xx"
 
 slack: {}
 # slack:
@@ -304,9 +327,18 @@ filestore:
       ##   set, choosing the default provisioner.  (gp2 on AWS, standard on
       ##   GKE, AWS & OpenStack)
       ##
-      # storageClass: "-"
+      storageClass: "sentry20"
       accessMode: ReadWriteOnce
       size: 10Gi
+      eximsize: 3Gi
+
+  dsym:
+    cache:
+      path: /var/lib/sentry/dsym-cache
+
+  releasefile:
+    cache:
+      path: /var/lib/sentry/releasefile-cache
 
       ## Whether to mount the persistent volume to the Sentry worker and
       ## cron deployments. This setting needs to be enabled for some advanced
@@ -321,9 +353,9 @@ filestore:
   ## Point this at a pre-configured secret containing a service account. The resulting
   ## secret will be mounted at /var/run/secrets/google
   gcs:
-    # credentialsFile: credentials.json
-    #  secretName:
-    #  bucketName:
+  # credentialsFile: credentials.json
+  #  secretName:
+  #  bucketName:
 
   ## Currently unconfigured and changing this has no impact on the template configuration.
   s3: {}
@@ -339,7 +371,100 @@ config:
   configYml: |
     # No YAML Extension Config Given
   sentryConfPy: |
-    # No Python Extension Config Given
+    #######################
+    # Кастомные настройки #
+    #######################
+
+    SENTRY_DEFAULT_TIME_ZONE = 'Europe/Moscow'
+
+    SENTRY_SINGLE_ORGANIZATION = False
+
+    SENTRY_OPTIONS.update({
+        'system.secret-key': env('SENTRY_SECRET_KEY'),
+        'mail.from': env('SENTRY_MAIL_FROM') or 'root@localhost',
+    })
+
+    if env('SENTRY_USE_LDAP', False):
+        import ldap
+        from django_auth_ldap.config import LDAPSearch, ActiveDirectoryGroupType
+
+        SENTRY_FEATURES.update({
+            'auth:register': False,
+            'organizations:sso-basic': False,
+            'organizations:sso-saml2': False,
+            'organizations:sso-rippling': False,
+        })
+
+        SENTRY_MANAGED_USER_FIELDS = ('name', 'email')
+
+        AUTHENTICATION_BACKENDS = (
+            'sentry_ldap_auth.backend.SentryLDAPBackend',
+        )
+
+        AUTH_LDAP_SERVER_URI = env('LDAP_SERVER_URI')
+        AUTH_LDAP_BIND_DN = env('LDAP_BIND_DN')
+        AUTH_LDAP_BIND_PASSWORD = env('LDAP_BIND_PASSWORD')
+
+        AUTH_LDAP_USER_SEARCH = LDAPSearch(
+            env('LDAP_USER_BASE_DN'),
+            ldap.SCOPE_SUBTREE,
+            env('LDAP_USER_FILTER') or '(&(objectClass=person)(sAMAccountName=%(user)s))'
+        )
+
+        AUTH_LDAP_GROUP_SEARCH = LDAPSearch(
+            env('LDAP_GROUP_BASE_DN'),
+            ldap.SCOPE_SUBTREE,
+            env('LDAP_GROUP_FILTER') or '(objectClass=group)'
+        )
+
+        AUTH_LDAP_GROUP_TYPE = ActiveDirectoryGroupType()
+
+        AUTH_LDAP_USER_STATUS_ATTR = env('LDAP_USER_STATUS_ATTR') or 'userAccountControl'
+        AUTH_LDAP_USER_DISABLED_MASK = int(env('LDAP_USER_DISABLED_MASK') or 2)
+
+        AUTH_LDAP_USER_ATTR_MAP = {
+            'name': env('LDAP_USER_ATTR_MAP_NAME') or 'displayName',
+            'email': env('LDAP_USER_ATTR_MAP_EMAIL') or 'mail',
+        }
+
+        AUTH_LDAP_CACHE_TIMEOUT = int(env('LDAP_CACHE_TIMEOUT') or 300)
+
+        AUTH_LDAP_SENTRY_INSTANCE_NAME = env('LDAP_SENTRY_INSTANCE_NAME') or 'Sentry'
+        AUTH_LDAP_SENTRY_DEFAULT_ORGANIZATION = env('LDAP_SENTRY_DEFAULT_ORGANIZATION') or 'sentry'
+        AUTH_LDAP_SENTRY_ROLES = [
+            {
+                'group_name': env('LDAP_SENTRY_MEMBERS_GROUP_NAME') or 'Members',
+                'role': 'member',
+            },
+            {
+                'group_name': env('LDAP_SENTRY_ADMINS_GROUP_NAME') or 'Admins',
+                'role': 'admin',
+            },
+            {
+                'group_name': env('LDAP_SENTRY_MANAGERS_GROUP_NAME') or 'Managers',
+                'role': 'manager',
+            },
+            {
+                'group_name': env('LDAP_SENTRY_OWNERS_GROUP_NAME') or 'Owners',
+                'role': 'owner',
+            },
+        ]
+        AUTH_LDAP_SENTRY_SUPERUSERS_GROUP_NAME = env('LDAP_SENTRY_SUPERUSERS_GROUP_NAME') or 'Superusers'
+
+        import logging
+
+        LOGGING['disable_existing_loggers'] = False
+
+        for logger_name in ['django_auth_ldap', 'sentry_auth_ldap']:
+            logger = logging.getLogger(logger_name)
+
+            # Встроенный в Sentry обработчик логов падает с ошибкой `UnicodeEncodeError`
+            # при записи в лог русскоязычных строк.
+            logger.propagate = False
+
+            logger.addHandler(logging.StreamHandler())
+            logger.setLevel('DEBUG')
+
   snubaSettingsPy: |
     # No Python Extension Config Given
   relay: |
@@ -355,10 +480,11 @@ clickhouse:
     persistentVolumeClaim:
       enabled: true
       dataPersistentVolume:
+        storageClassName: sentry20
         enabled: true
         accessModes:
-        - "ReadWriteOnce"
-        storage: "30Gi"
+          - "ReadWriteOnce"
+        storage: "10Gi"
 
 ## This value is only used when clickhouse.enabled is set to false
 ##
@@ -418,6 +544,7 @@ postgresql:
   nameOverride: sentry-postgresql
   postgresqlUsername: postgres
   postgresqlDatabase: sentry
+  postgresqlPassword: 3KDQFSHRwJ
   replication:
     enabled: false
     slaveReplicas: 2
@@ -448,6 +575,7 @@ rabbitmq:
     minAvailable: 1
 
   persistentVolume:
+    storageClass: sentry20
     enabled: true
   resources: {}
   # rabbitmqMemoryHighWatermark: 600MB
@@ -455,16 +583,16 @@ rabbitmq:
 
   definitions:
     policies: |-
-     {
-       "name": "ha-all",
-       "pattern": "^((?!celeryev.*).)*$",
-       "vhost": "/",
-       "definition": {
-         "ha-mode": "all",
-         "ha-sync-mode": "automatic",
-         "ha-sync-batch-size": 1
-       }
-     }
+      {
+        "name": "ha-all",
+        "pattern": "^((?!celeryev.*).)*$",
+        "vhost": "/",
+        "definition": {
+          "ha-mode": "all",
+          "ha-sync-mode": "automatic",
+          "ha-sync-batch-size": 1
+        }
+      }
 
 ## Prometheus Exporter / Metrics
 ##
@@ -525,3 +653,12 @@ metrics:
     #   any: true
     scrapeInterval: 30s
     # honorLabels: true
+
+# LDAP setting
+ldapUri: ldap://192.168.0.47:3268
+ldapUserBaseDn: OU=Users,OU=IT,DC=srvhub,DC=ru
+ldapGroupBaseDn: OU=Services,DC=srvhub,DC=ru
+ldapSentryMembersGroupName: Sentry Members
+ldapSentryOwnersGroupName: Sentry Owners
+ldapBindDn: syncldap@srvhub.ru
+ldapBindPassword: SDFDkfLbvbh2015

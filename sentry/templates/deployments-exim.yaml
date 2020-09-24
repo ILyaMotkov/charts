@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ template "sentry.fullname" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+  name: {{ template "sentry.fullname" . }}-smtp
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "sentry.fullname" . }}-smtp
+      release: "{{ .Release.Name }}"
+      role: smtp
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: {{ template "sentry.fullname" . }}-smtp
+        release: "{{ .Release.Name }}"
+        role: smtp
+    spec:
+      {{- if .Values.images.exim.imagePullSecrets }}
+      imagePullSecrets:
+      {{ toYaml .Values.images.exim.imagePullSecrets | indent 8 }}
+      {{- end }}
+      containers:
+        - env:
+            - name: SMTP_REMOTE_HOST
+              value: {{ .Values.exim.smtpHost }}
+            - name: SMTP_REMOTE_PASSWORD
+              value: {{ .Values.exim.smtpPassword }}
+            - name: SMTP_REMOTE_PORT
+              value: "{{ .Values.exim.smtpPort }}"
+            - name: SMTP_REMOTE_PROTOCOL
+              value: {{ .Values.exim.smtpProtocol }}
+            - name: SMTP_REMOTE_USER
+              value: {{ .Values.exim.smtpUser }}
+          image: "{{ .Values.images.exim.repository }}"
+          imagePullPolicy: {{ .Values.images.exim.pullPolicy }}
+          name: smtp
+          ports:
+            - containerPort: 25
+          resources: {}
+          volumeMounts:
+            - mountPath: /var/spool/exim4
+              name: sentry-smtp-data
+            - mountPath: /var/log/exim4
+              name: sentry-smtp-log
+      restartPolicy: Always
+      volumes:
+        - name: sentry-smtp-data
+          persistentVolumeClaim:
+            claimName: {{ template "sentry.fullname" . }}-smtp
+        - name: sentry-smtp-log
+          persistentVolumeClaim:
+            claimName: {{ template "sentry.fullname" . }}-smtp-log

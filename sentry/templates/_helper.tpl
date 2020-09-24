@@ -294,3 +294,14 @@ Set RabbitMQ host
 {{ .Values.rabbitmq.host }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Set exim service name
+*/}}
+{{- define "sentry.exim.fullname" -}}
+{{- if .Values.mail.host -}}
+{{- .Values.mail.host | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name "exim" | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "sentry.fullname" . }}-env
+data:
+  SENTRY_USE_LDAP: "1"
+  LDAP_SERVER_URI: {{ .Values.ldapUri }}
+  LDAP_USER_BASE_DN: {{ .Values.ldapUserBaseDn }}
+  LDAP_GROUP_BASE_DN: {{ .Values.ldapGroupBaseDn }}
+  LDAP_BIND_DN: {{ .Values.ldapBindDn }}
+  LDAP_BIND_PASSWORD: {{ .Values.ldapBindPassword }}
+  SENTRY_MAIL_FROM: {{ .Values.mail.from }}
+  SNUBA: http://{{ template "sentry.fullname" . }}-snuba:{{ template "snuba.port" }}
+  C_FORCE_ROOT: "true"
